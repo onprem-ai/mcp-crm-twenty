@@ -25,27 +25,21 @@ export TWENTY_CRM_URL="https://your-twenty-instance.com"
 export TWENTY_CRM_API_KEY="your-api-key"
 ```
 
-### Claude Desktop / Claude Code
+### MCP Config
 
-Add to your MCP config:
+Add to your MCP config (Claude Desktop, Claude Code, Shortwave, Cursor, etc.):
 
 ```json
 {
   "crm-twenty": {
     "command": "npx",
-    "args": ["tsx", "/path/to/mcp-crm-twenty/src/index.ts"],
+    "args": ["-y", "github:onprem-ai/mcp-crm-twenty"],
     "env": {
-      "TWENTY_CRM_URL": "${TWENTY_CRM_URL}",
-      "TWENTY_CRM_API_KEY": "${TWENTY_CRM_API_KEY}"
+      "TWENTY_CRM_URL": "https://your-twenty-instance.com",
+      "TWENTY_CRM_API_KEY": "your-api-key"
     }
   }
 }
-```
-
-### Install Dependencies
-
-```bash
-npm install
 ```
 
 ## Usage Examples
