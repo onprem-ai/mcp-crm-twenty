@@ -1,10 +1,11 @@
 {
   "name": "crm-twenty-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "bin": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:http": "MCP_TRANSPORT=http tsx src/index.ts",
     "build": "tsc",
     "prepare": "npm run build",
     "start": "node dist/index.js"

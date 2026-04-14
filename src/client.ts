@@ -7,15 +7,9 @@ export class TwentyClient {
   private baseUrl: string;
   private apiKey: string;
 
-  constructor() {
-    const url = process.env.TWENTY_CRM_URL;
-    const key = process.env.TWENTY_CRM_API_KEY;
-
-    if (!url) throw new Error("TWENTY_CRM_URL environment variable is required");
-    if (!key) throw new Error("TWENTY_CRM_API_KEY environment variable is required");
-
+  constructor(url: string, apiKey: string) {
     this.baseUrl = url.replace(/\/(rest|api|graphql)\/?$/, "");
-    this.apiKey = key;
+    this.apiKey = apiKey;
   }
 
   async query<T = unknown>(
