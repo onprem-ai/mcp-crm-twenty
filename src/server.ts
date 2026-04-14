@@ -18,6 +18,36 @@ export function createMcpServer(client: TwentyClient): McpServer {
 
   const resourceEnum = z.enum(RESOURCE_NAMES as [string, ...string[]]);
 
+  /** Inject web UI URLs into response records. */
+  function injectUrls(data: unknown, resourcePlural: string): unknown {
+    if (Array.isArray(data)) {
+      return data.map((item) => injectUrls(item, resourcePlural));
+    }
+    if (data && typeof data === "object") {
+      const obj = data as Record<string, unknown>;
+      // Search results have edges[].node structure
+      if ("edges" in obj && Array.isArray(obj.edges)) {
+        return {
+          ...obj,
+          edges: (obj.edges as Array<{ node: unknown; cursor?: string }>).map((edge) => ({
+            ...edge,
+            node: injectUrls(edge.node, resourcePlural),
+          })),
+        };
+      }
+      // Single record with id
+      if ("id" in obj && typeof obj.id === "string") {
+        return { ...obj, url: client.recordUrl(resourcePlural, obj.id) };
+      }
+    }
+    return data;
+  }
+
+  /** Format result with injected URLs. */
+  function formatResult(data: unknown, resourcePlural: string) {
+    return { content: [{ type: "text" as const, text: JSON.stringify(injectUrls(data, resourcePlural), null, 2) }] };
+  }
+
   /** Fetch and format the schema for a resource's CreateInput type. */
   async function getSchemaText(resourceName: string): Promise<string> {
     const resource = getResource(resourceName);
@@ -79,7 +109,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildSearchQuery(resource, params);
       const data = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return { content: [{ type: "text" as const, text: JSON.stringify(data[resultKey], null, 2) }] };
+      return formatResult(data[resultKey], resource.plural);
     }),
   );
 
@@ -98,7 +128,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildGetQuery(resource, params.id, params.fields);
       const data = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return { content: [{ type: "text" as const, text: JSON.stringify(data[resultKey], null, 2) }] };
+      return formatResult(data[resultKey], resource.plural);
     },
   );
 
@@ -117,7 +147,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildCreateMutation(resource, params.data);
       const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result[resultKey], null, 2) }] };
+      return formatResult(result[resultKey], resource.plural);
     }),
   );
 
@@ -137,7 +167,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildUpdateMutation(resource, params.id, params.data);
       const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result[resultKey], null, 2) }] };
+      return formatResult(result[resultKey], resource.plural);
     }),
   );
 
@@ -155,7 +185,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildDeleteMutation(resource, params.id);
       const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result[resultKey], null, 2) }] };
+      return formatResult(result[resultKey], resource.plural);
     },
   );
 

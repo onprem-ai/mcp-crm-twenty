@@ -33,6 +33,11 @@ export class TwentyClient {
     this.apiKey = apiKey;
   }
 
+  /** Build a web UI URL for a record. */
+  recordUrl(resourcePlural: string, id: string): string {
+    return `${this.baseUrl}/objects/${resourcePlural}/${id}`;
+  }
+
   async query<T = unknown>(
     operationName: string,
     query: string,
