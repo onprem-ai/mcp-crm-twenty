@@ -14,7 +14,7 @@ export class TwentyClient {
     if (!url) throw new Error("TWENTY_CRM_URL environment variable is required");
     if (!key) throw new Error("TWENTY_CRM_API_KEY environment variable is required");
 
-    this.baseUrl = url.replace(/\/$/, "");
+    this.baseUrl = url.replace(/\/(rest|api|graphql)\/?$/, "");
     this.apiKey = key;
   }
 
