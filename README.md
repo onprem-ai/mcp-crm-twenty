@@ -1,0 +1,85 @@
+# Twenty CRM MCP Server
+
+An MCP (Model Context Protocol) server for [Twenty CRM](https://twenty.com) that provides 5 generic CRUD tools for managing CRM data.
+
+Works with any MCP client: Claude Desktop, Claude Code, Cursor, Cline, etc.
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `crm_twenty_search` | Search and list records with filtering, ordering, pagination |
+| `crm_twenty_get` | Get a single record by ID |
+| `crm_twenty_create` | Create a new record |
+| `crm_twenty_update` | Update an existing record |
+| `crm_twenty_delete` | Soft-delete a record (can be restored) |
+
+All tools use a `resource` parameter to specify the entity type: `people`, `companies`, `opportunities`, `tasks`, `notes`, `attachments`, `favorites`, `timelineActivities`, `workspaceMembers`.
+
+## Setup
+
+### Environment Variables
+
+```bash
+export TWENTY_CRM_URL="https://your-twenty-instance.com"
+export TWENTY_CRM_API_KEY="your-api-key"
+```
+
+### Claude Desktop / Claude Code
+
+Add to your MCP config:
+
+```json
+{
+  "crm-twenty": {
+    "command": "npx",
+    "args": ["tsx", "/path/to/mcp-crm-twenty/src/index.ts"],
+    "env": {
+      "TWENTY_CRM_URL": "${TWENTY_CRM_URL}",
+      "TWENTY_CRM_API_KEY": "${TWENTY_CRM_API_KEY}"
+    }
+  }
+}
+```
+
+### Install Dependencies
+
+```bash
+npm install
+```
+
+## Usage Examples
+
+**Search people:**
+```json
+{"resource": "people", "filter": {"name": {"firstName": {"like": "%John%"}}}, "first": 10}
+```
+
+**Get a company by ID:**
+```json
+{"resource": "companies", "id": "uuid-here"}
+```
+
+**Create a task:**
+```json
+{"resource": "tasks", "data": {"title": "Follow up", "status": "TODO", "assigneeId": "uuid"}}
+```
+
+**Update a deal stage:**
+```json
+{"resource": "opportunities", "id": "uuid", "data": {"stage": "WON"}}
+```
+
+## Filter Syntax
+
+Filters use Twenty's GraphQL filter format:
+
+- String: `{eq, neq, like, ilike, startsWith, endsWith, in, is}`
+- Number: `{eq, neq, gt, gte, lt, lte, in, is}`
+- Boolean: `{eq, is}`
+- DateTime: `{eq, neq, gt, gte, lt, lte, is}`
+- Logical: `{and: [...], or: [...], not: {...}}`
+
+## Architecture
+
+Uses Twenty's GraphQL API with typed inputs for efficient field selection. See `docs/` for the design spec and implementation plan.
