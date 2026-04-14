@@ -42,6 +42,29 @@ Add to your MCP config (Claude Desktop, Claude Code, Shortwave, Cursor, etc.):
 }
 ```
 
+### Docker
+
+```json
+{
+  "crm-twenty": {
+    "command": "docker",
+    "args": ["run", "-i", "--rm",
+      "-e", "TWENTY_CRM_URL", "-e", "TWENTY_CRM_API_KEY",
+      "ghcr.io/onprem-ai/mcp-crm-twenty:latest"],
+    "env": {
+      "TWENTY_CRM_URL": "https://your-twenty-instance.com",
+      "TWENTY_CRM_API_KEY": "your-api-key"
+    }
+  }
+}
+```
+
+Or with Docker Compose:
+
+```bash
+TWENTY_CRM_URL=https://your-twenty-instance.com TWENTY_CRM_API_KEY=your-key docker compose up
+```
+
 ## Usage Examples
 
 **Search people:**

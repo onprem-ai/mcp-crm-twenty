@@ -1,0 +1,7 @@
+services:
+  crm-twenty-mcp:
+    image: ghcr.io/onprem-ai/mcp-crm-twenty:latest
+    environment:
+      - TWENTY_CRM_URL=${TWENTY_CRM_URL}
+      - TWENTY_CRM_API_KEY=${TWENTY_CRM_API_KEY}
+    stdin_open: true
