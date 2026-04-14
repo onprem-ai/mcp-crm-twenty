@@ -26,11 +26,18 @@ export class TwentyClient {
       body: JSON.stringify({ operationName, query, variables }),
     });
 
+    const result = (await response.json().catch(() => null)) as GraphQLResponse<T> | null;
+
     if (!response.ok) {
-      throw new Error(`Twenty API HTTP error: ${response.status} ${response.statusText}`);
+      const detail = result?.errors?.map((e) => e.message).join("; ")
+        ?? JSON.stringify(result)
+        ?? response.statusText;
+      throw new Error(`Twenty API error (${response.status}): ${detail}`);
     }
 
-    const result = (await response.json()) as GraphQLResponse<T>;
+    if (!result) {
+      throw new Error("Twenty API returned unparseable response");
+    }
 
     if (result.errors?.length) {
       const messages = result.errors.map((e) => e.message).join("; ");
