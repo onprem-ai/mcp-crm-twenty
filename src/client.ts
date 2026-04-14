@@ -3,9 +3,30 @@ export interface GraphQLResponse<T = unknown> {
   errors?: Array<{ message: string; path?: string[] }>;
 }
 
+interface IntrospectionField {
+  name: string;
+  type: {
+    name: string | null;
+    kind: string;
+    ofType: { name: string | null; kind: string; ofType: { name: string | null } | null } | null;
+  };
+}
+
+interface IntrospectionType {
+  name: string;
+  inputFields: IntrospectionField[];
+}
+
+export interface FieldInfo {
+  name: string;
+  type: string;
+  fields?: FieldInfo[];
+}
+
 export class TwentyClient {
   private baseUrl: string;
   private apiKey: string;
+  private schemaCache = new Map<string, FieldInfo[]>();
 
   constructor(url: string, apiKey: string) {
     this.baseUrl = url.replace(/\/(rest|api|graphql)\/?$/, "");
@@ -50,4 +71,106 @@ export class TwentyClient {
 
     return result.data;
   }
+
+  /** Raw GraphQL request without operationName (needed for introspection). */
+  private async rawQuery<T = unknown>(query: string): Promise<T> {
+    const response = await fetch(`${this.baseUrl}/graphql`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    const result = (await response.json().catch(() => null)) as GraphQLResponse<T> | null;
+
+    if (!response.ok || !result?.data) {
+      const detail = result?.errors?.map((e) => e.message).join("; ") ?? response.statusText;
+      throw new Error(`Introspection failed: ${detail}`);
+    }
+
+    if (result.errors?.length) {
+      throw new Error(`Introspection error: ${result.errors.map((e) => e.message).join("; ")}`);
+    }
+
+    return result.data;
+  }
+
+  /** Introspect a GraphQL input type and resolve nested input objects (1 level deep). */
+  async introspectInputType(typeName: string): Promise<FieldInfo[]> {
+    const cached = this.schemaCache.get(typeName);
+    if (cached) return cached;
+
+    const data = await this.rawQuery<{ __type: IntrospectionType | null }>(
+      `{ __type(name: "${typeName}") { name inputFields { name type { name kind ofType { name kind ofType { name } } } } } }`,
+    );
+
+    if (!data.__type) {
+      throw new Error(`Type "${typeName}" not found in schema`);
+    }
+
+    // Collect nested INPUT_OBJECT type names to resolve
+    const nestedTypeNames = new Set<string>();
+    for (const field of data.__type.inputFields) {
+      if (field.type.kind === "INPUT_OBJECT" && field.type.name) {
+        nestedTypeNames.add(field.type.name);
+      }
+    }
+
+    // Batch-introspect nested types
+    const nestedTypes = new Map<string, IntrospectionField[]>();
+    if (nestedTypeNames.size > 0) {
+      const subQueries = [...nestedTypeNames].map((n, i) =>
+        `t${i}: __type(name: "${n}") { name inputFields { name type { name kind ofType { name kind ofType { name } } } } }`
+      ).join(" ");
+
+      const nestedData = await this.rawQuery<Record<string, IntrospectionType | null>>(
+        `{ ${subQueries} }`,
+      );
+
+      for (const val of Object.values(nestedData)) {
+        if (val) nestedTypes.set(val.name, val.inputFields);
+      }
+    }
+
+    const fields: FieldInfo[] = data.__type.inputFields.map((f) => {
+      const typStr = resolveTypeName(f);
+      const nested = f.type.kind === "INPUT_OBJECT" && f.type.name
+        ? nestedTypes.get(f.type.name)
+        : null;
+
+      const info: FieldInfo = { name: f.name, type: typStr };
+      if (nested) {
+        info.fields = nested.map((nf) => ({ name: nf.name, type: resolveTypeName(nf) }));
+      }
+      return info;
+    });
+
+    this.schemaCache.set(typeName, fields);
+    return fields;
+  }
+
+  /** Format introspected fields into a readable schema string. */
+  static formatSchema(typeName: string, fields: FieldInfo[]): string {
+    const lines: string[] = [`${typeName}:`];
+    for (const f of fields) {
+      if (f.fields) {
+        lines.push(`  ${f.name}: { ${f.fields.map((sf) => `${sf.name}: ${sf.type}`).join(", ")} }`);
+      } else {
+        lines.push(`  ${f.name}: ${f.type}`);
+      }
+    }
+    return lines.join("\n");
+  }
+}
+
+function resolveTypeName(field: IntrospectionField): string {
+  const t = field.type;
+  if (t.name) return t.name;
+  if (t.kind === "NON_NULL" && t.ofType?.name) return `${t.ofType.name}!`;
+  if (t.kind === "LIST" && t.ofType?.name) return `[${t.ofType.name}]`;
+  if (t.kind === "LIST" && t.ofType?.ofType?.name) return `[${t.ofType.ofType.name}]`;
+  if (t.ofType?.name) return t.ofType.name;
+  return "unknown";
 }
