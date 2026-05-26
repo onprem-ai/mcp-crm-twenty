@@ -34,8 +34,8 @@ export class TwentyClient {
   }
 
   /** Build a web UI URL for a record. */
-  recordUrl(resourcePlural: string, id: string): string {
-    return `${this.baseUrl}/objects/${resourcePlural}/${id}`;
+  recordUrl(resourceSingular: string, id: string): string {
+    return `${this.baseUrl}/object/${resourceSingular}/${id}`;
   }
 
   async query<T = unknown>(
@@ -173,9 +173,14 @@ export class TwentyClient {
 function resolveTypeName(field: IntrospectionField): string {
   const t = field.type;
   if (t.name) return t.name;
-  if (t.kind === "NON_NULL" && t.ofType?.name) return `${t.ofType.name}!`;
-  if (t.kind === "LIST" && t.ofType?.name) return `[${t.ofType.name}]`;
-  if (t.kind === "LIST" && t.ofType?.ofType?.name) return `[${t.ofType.ofType.name}]`;
+  if (t.kind === "NON_NULL" && t.ofType) {
+    if (t.ofType.name) return `${t.ofType.name}!`;
+    if (t.ofType.kind === "LIST" && t.ofType.ofType?.name) return `[${t.ofType.ofType.name}]!`;
+  }
+  if (t.kind === "LIST") {
+    if (t.ofType?.name) return `[${t.ofType.name}]`;
+    if (t.ofType?.kind === "NON_NULL" && t.ofType.ofType?.name) return `[${t.ofType.ofType.name}!]`;
+  }
   if (t.ofType?.name) return t.ofType.name;
   return "unknown";
 }
