@@ -7,6 +7,7 @@ export interface ResourceDef {
   createMutation: string;
   updateMutation: string;
   deleteMutation: string;
+  restoreMutation: string;
   defaultFields: string;
 }
 
@@ -20,6 +21,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createPerson",
     updateMutation: "updatePerson",
     deleteMutation: "deletePerson",
+    restoreMutation: "restorePerson",
     defaultFields: `id name { firstName lastName } emails { primaryEmail } phones { primaryPhoneNumber } jobTitle city avatarUrl companyId createdAt updatedAt`,
   },
   companies: {
@@ -31,6 +33,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createCompany",
     updateMutation: "updateCompany",
     deleteMutation: "deleteCompany",
+    restoreMutation: "restoreCompany",
     defaultFields: `id name domainName { primaryLinkUrl } address { addressCity addressCountry } employees linkedinLink { primaryLinkUrl } annualRecurringRevenue { amountMicros currencyCode } idealCustomerProfile accountOwnerId createdAt updatedAt`,
   },
   opportunities: {
@@ -42,6 +45,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createOpportunity",
     updateMutation: "updateOpportunity",
     deleteMutation: "deleteOpportunity",
+    restoreMutation: "restoreOpportunity",
     defaultFields: `id name amount { amountMicros currencyCode } closeDate stage companyId pointOfContactId ownerId position createdAt updatedAt`,
   },
   tasks: {
@@ -53,6 +57,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createTask",
     updateMutation: "updateTask",
     deleteMutation: "deleteTask",
+    restoreMutation: "restoreTask",
     defaultFields: `id title status dueAt assigneeId position createdAt updatedAt`,
   },
   notes: {
@@ -64,7 +69,32 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createNote",
     updateMutation: "updateNote",
     deleteMutation: "deleteNote",
+    restoreMutation: "restoreNote",
     defaultFields: `id title bodyV2 position createdAt updatedAt`,
+  },
+  noteTargets: {
+    singular: "noteTarget",
+    plural: "noteTargets",
+    typeName: "NoteTarget",
+    querySingular: "noteTarget",
+    queryPlural: "noteTargets",
+    createMutation: "createNoteTarget",
+    updateMutation: "updateNoteTarget",
+    deleteMutation: "deleteNoteTarget",
+    restoreMutation: "restoreNoteTarget",
+    defaultFields: `id noteId targetCompanyId targetPersonId targetOpportunityId position createdAt updatedAt`,
+  },
+  taskTargets: {
+    singular: "taskTarget",
+    plural: "taskTargets",
+    typeName: "TaskTarget",
+    querySingular: "taskTarget",
+    queryPlural: "taskTargets",
+    createMutation: "createTaskTarget",
+    updateMutation: "updateTaskTarget",
+    deleteMutation: "deleteTaskTarget",
+    restoreMutation: "restoreTaskTarget",
+    defaultFields: `id taskId targetCompanyId targetPersonId targetOpportunityId position createdAt updatedAt`,
   },
   attachments: {
     singular: "attachment",
@@ -75,6 +105,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createAttachment",
     updateMutation: "updateAttachment",
     deleteMutation: "deleteAttachment",
+    restoreMutation: "restoreAttachment",
     defaultFields: `id name fullPath fileCategory targetPersonId targetCompanyId targetOpportunityId targetTaskId targetNoteId createdAt updatedAt`,
   },
   favorites: {
@@ -86,6 +117,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createFavorite",
     updateMutation: "updateFavorite",
     deleteMutation: "deleteFavorite",
+    restoreMutation: "restoreFavorite",
     defaultFields: `id companyId personId opportunityId taskId noteId position createdAt`,
   },
   timelineActivities: {
@@ -97,6 +129,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createTimelineActivity",
     updateMutation: "updateTimelineActivity",
     deleteMutation: "deleteTimelineActivity",
+    restoreMutation: "restoreTimelineActivity",
     defaultFields: `id happensAt name properties linkedRecordCachedName linkedRecordId targetCompanyId targetPersonId targetOpportunityId targetTaskId targetNoteId createdAt`,
   },
   workspaceMembers: {
@@ -108,6 +141,7 @@ export const RESOURCES: Record<string, ResourceDef> = {
     createMutation: "createWorkspaceMember",
     updateMutation: "updateWorkspaceMember",
     deleteMutation: "deleteWorkspaceMember",
+    restoreMutation: "restoreWorkspaceMember",
     defaultFields: `id name { firstName lastName } userEmail avatarUrl locale timeZone createdAt updatedAt`,
   },
 };

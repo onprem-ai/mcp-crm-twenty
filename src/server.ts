@@ -5,13 +5,7 @@ import { getResource, RESOURCE_NAMES } from "./resources.js";
 import {
   buildSearchQuery,
   buildGetQuery,
-  buildCreateMutation,
-  buildUpdateMutation,
-  buildDeleteMutation,
   buildRestoreMutation,
-  buildBulkCreateMutation,
-  buildBulkUpdateMutation,
-  buildBulkDeleteMutation,
   buildFullTextSearchQuery,
   buildDuplicatesQuery,
   buildGroupByQuery,
@@ -20,7 +14,7 @@ import {
 export function createMcpServer(client: TwentyClient): McpServer {
   const server = new McpServer({
     name: "crm-twenty",
-    version: "1.2.1",
+    version: "1.3.0",
   });
 
   const resourceEnum = z.enum(RESOURCE_NAMES as [string, ...string[]]);
@@ -56,29 +50,9 @@ export function createMcpServer(client: TwentyClient): McpServer {
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
   }
 
-  async function getSchemaText(resourceName: string, variant: "create" | "update" | "filter" = "create"): Promise<string> {
-    const resource = getResource(resourceName);
-    const suffixes = { create: "CreateInput", update: "UpdateInput", filter: "FilterInput" };
-    const typeName = `${resource.typeName}${suffixes[variant]}`;
-    const fields = await client.introspectInputType(typeName);
-    return TwentyClient.formatSchema(typeName, fields);
-  }
-
-  function withSchemaOnError<P extends { resource: string }>(
-    handler: (params: P) => Promise<{ content: { type: "text"; text: string }[] }>,
-  ) {
-    return async (params: P) => {
-      try {
-        return await handler(params);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        let schemaHint = "";
-        try {
-          schemaHint = "\n\nExpected field schema (from GraphQL introspection):\n" + await getSchemaText(params.resource);
-        } catch { /* ignore introspection errors */ }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}${schemaHint}` }] };
-      }
-    };
+  function formatError(err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text" as const, text: `Error: ${msg}` }] };
   }
 
   // --- crm_twenty_schema ---
@@ -86,19 +60,25 @@ export function createMcpServer(client: TwentyClient): McpServer {
     "crm_twenty_schema",
     {
       description:
-        "Get the field schema for a CRM resource type. Returns the exact input fields from Twenty CRM's GraphQL schema. Supports create, update, and filter schemas.",
+        "Get the field schema for a CRM resource type. Returns ALL fields including custom fields from Twenty's metadata API. Shows field names, types, and whether they are custom.",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type"),
-        variant: z.enum(["create", "update", "filter"]).optional().describe("Which schema to return: create (default), update, or filter"),
       },
     },
     async (params) => {
-      const schema = await getSchemaText(params.resource, params.variant ?? "create");
-      return { content: [{ type: "text" as const, text: schema }] };
+      const resource = getResource(params.resource);
+      try {
+        const fields = await client.getCompleteSchema(resource.singular);
+        const schema = TwentyClient.formatMetadataSchema(resource.singular, fields);
+        return { content: [{ type: "text" as const, text: schema }] };
+      } catch {
+        const fields = await client.introspectInputType(`${resource.typeName}CreateInput`);
+        return { content: [{ type: "text" as const, text: TwentyClient.formatSchema(`${resource.typeName}CreateInput`, fields) + "\n\n(Note: custom fields not shown - metadata API unavailable)" }] };
+      }
     },
   );
 
-  // --- crm_twenty_search ---
+  // --- crm_twenty_search (GraphQL) ---
   server.registerTool(
     "crm_twenty_search",
     {
@@ -116,15 +96,15 @@ export function createMcpServer(client: TwentyClient): McpServer {
         offset: z.number().int().min(0).optional().describe("Skip this many records (offset-based pagination)"),
       },
     },
-    withSchemaOnError(async (params) => {
+    async (params) => {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildSearchQuery(resource, params);
       const data = await client.query<Record<string, unknown>>(operationName, query, variables);
       return formatResult(data[resultKey], resource.singular);
-    }),
+    },
   );
 
-  // --- crm_twenty_get ---
+  // --- crm_twenty_get (GraphQL) ---
   server.registerTool(
     "crm_twenty_get",
     {
@@ -135,132 +115,147 @@ export function createMcpServer(client: TwentyClient): McpServer {
         fields: z.array(z.string()).optional().describe("Fields to return (GraphQL selection). Omit to use defaults."),
       },
     },
-    withSchemaOnError(async (params) => {
+    async (params) => {
       const resource = getResource(params.resource);
       const { query, variables, operationName, resultKey } = buildGetQuery(resource, params.id, params.fields);
       const data = await client.query<Record<string, unknown>>(operationName, query, variables);
       return formatResult(data[resultKey], resource.singular);
-    }),
+    },
   );
 
-  // --- crm_twenty_create ---
+  // --- crm_twenty_create (REST) ---
   server.registerTool(
     "crm_twenty_create",
     {
       description:
-        "Create a new CRM record. IMPORTANT: Call crm_twenty_schema first to get the exact field names and types — many fields require nested objects (e.g. name: {firstName, lastName}, emails: {primaryEmail}).",
+        "Create a new CRM record via REST API. Supports all fields including custom fields. Call crm_twenty_schema first to get field names and types.",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type to create"),
-        data: z.record(z.unknown()).describe("Record data. MUST match the schema from crm_twenty_schema — use nested objects where required."),
-        upsert: z.boolean().optional().describe("If true, update existing record instead of failing on conflict."),
+        data: z.record(z.unknown()).describe("Record data. Field names must match the schema from crm_twenty_schema."),
       },
     },
-    withSchemaOnError(async (params) => {
-      const resource = getResource(params.resource);
-      const { query, variables, operationName, resultKey } = buildCreateMutation(resource, params.data, params.upsert);
-      const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return formatResult(result[resultKey], resource.singular);
-    }),
+    async (params) => {
+      try {
+        const resource = getResource(params.resource);
+        const result = await client.restCreate(resource.plural, params.data);
+        return formatResult(result, resource.singular);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
   );
 
-  // --- crm_twenty_bulk_create ---
+  // --- crm_twenty_bulk_create (REST) ---
   server.registerTool(
     "crm_twenty_bulk_create",
     {
       description:
-        "Create multiple CRM records in one call. Pass an array of record objects. Call crm_twenty_schema first for field names.",
+        "Create multiple CRM records in one call via REST API. Supports all fields including custom fields.",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type to create"),
-        data: z.array(z.record(z.unknown())).min(1).max(100).describe("Array of record objects to create (max 100)."),
-        upsert: z.boolean().optional().describe("If true, update existing records instead of failing on conflict."),
+        data: z.array(z.record(z.unknown())).min(1).max(60).describe("Array of record objects to create (max 60)."),
       },
     },
-    withSchemaOnError(async (params) => {
-      const resource = getResource(params.resource);
-      const { query, variables, operationName, resultKey } = buildBulkCreateMutation(resource, params.data, params.upsert);
-      const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return formatResult(result[resultKey], resource.singular);
-    }),
+    async (params) => {
+      try {
+        const resource = getResource(params.resource);
+        const result = await client.restBulkCreate(resource.plural, params.data);
+        return formatResult(result, resource.singular);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
   );
 
-  // --- crm_twenty_update ---
+  // --- crm_twenty_update (REST) ---
   server.registerTool(
     "crm_twenty_update",
     {
       description:
-        "Update an existing CRM record. Only include fields you want to change. Call crm_twenty_schema first to get the exact field names and types.",
+        "Update an existing CRM record via REST API. Supports all fields including custom fields. Only include fields you want to change.",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type to update"),
         id: z.string().describe("The record UUID to update"),
-        data: z.record(z.unknown()).describe("Fields to update. MUST match the schema from crm_twenty_schema — use nested objects where required."),
+        data: z.record(z.unknown()).describe("Fields to update. Field names must match the schema from crm_twenty_schema."),
       },
     },
-    withSchemaOnError(async (params) => {
-      const resource = getResource(params.resource);
-      const { query, variables, operationName, resultKey } = buildUpdateMutation(resource, params.id, params.data);
-      const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return formatResult(result[resultKey], resource.singular);
-    }),
+    async (params) => {
+      try {
+        const resource = getResource(params.resource);
+        const result = await client.restUpdate(resource.plural, params.id, params.data);
+        return formatResult(result, resource.singular);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
   );
 
-  // --- crm_twenty_bulk_update ---
+  // --- crm_twenty_bulk_update (REST) ---
   server.registerTool(
     "crm_twenty_bulk_update",
     {
       description:
-        "Update multiple CRM records matching a filter. All matching records get the same field changes.",
+        "Update multiple CRM records in one call via REST API. Each record in the array must include its id plus the fields to update.",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type to update"),
-        filter: z.record(z.unknown()).describe("Filter to select records to update. Use crm_twenty_search first to verify which records match."),
-        data: z.record(z.unknown()).describe("Fields to update on all matching records."),
+        data: z.array(z.record(z.unknown())).min(1).max(60).describe("Array of objects, each with 'id' and fields to update."),
       },
     },
-    withSchemaOnError(async (params) => {
-      const resource = getResource(params.resource);
-      const { query, variables, operationName, resultKey } = buildBulkUpdateMutation(resource, params.filter, params.data);
-      const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return formatResult(result[resultKey], resource.singular);
-    }),
+    async (params) => {
+      try {
+        const resource = getResource(params.resource);
+        const result = await client.restBulkUpdate(resource.plural, params.data as Array<{ id: string } & Record<string, unknown>>);
+        return formatResult(result, resource.singular);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
   );
 
-  // --- crm_twenty_delete ---
+  // --- crm_twenty_delete (REST) ---
   server.registerTool(
     "crm_twenty_delete",
     {
-      description: "Soft-delete a CRM record (can be restored with crm_twenty_restore).",
+      description: "Soft-delete a CRM record via REST API (can be restored with crm_twenty_restore).",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type to delete"),
         id: z.string().describe("The record UUID to delete"),
       },
     },
-    withSchemaOnError(async (params) => {
-      const resource = getResource(params.resource);
-      const { query, variables, operationName, resultKey } = buildDeleteMutation(resource, params.id);
-      const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return formatResult(result[resultKey], resource.singular);
-    }),
+    async (params) => {
+      try {
+        const resource = getResource(params.resource);
+        const result = await client.restDelete(resource.plural, params.id);
+        return formatResult(result, resource.singular);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
   );
 
-  // --- crm_twenty_bulk_delete ---
+  // --- crm_twenty_bulk_delete (REST) ---
   server.registerTool(
     "crm_twenty_bulk_delete",
     {
       description:
-        "Soft-delete multiple CRM records matching a filter. Use crm_twenty_search first to verify which records match.",
+        "Soft-delete multiple CRM records by IDs via REST API.",
       inputSchema: {
         resource: resourceEnum.describe("The CRM resource type to delete"),
-        filter: z.record(z.unknown()).describe("Filter to select records to soft-delete."),
+        ids: z.array(z.string()).min(1).max(60).describe("Array of record UUIDs to soft-delete."),
       },
     },
-    withSchemaOnError(async (params) => {
-      const resource = getResource(params.resource);
-      const { query, variables, operationName, resultKey } = buildBulkDeleteMutation(resource, params.filter);
-      const result = await client.query<Record<string, unknown>>(operationName, query, variables);
-      return formatResult(result[resultKey], resource.singular);
-    }),
+    async (params) => {
+      try {
+        const resource = getResource(params.resource);
+        const result = await client.restBulkDelete(resource.plural, params.ids);
+        return formatResult(result, resource.singular);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
   );
 
-  // --- crm_twenty_restore ---
+  // --- crm_twenty_restore (GraphQL - no REST equivalent) ---
   server.registerTool(
     "crm_twenty_restore",
     {
@@ -278,7 +273,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
     },
   );
 
-  // --- crm_twenty_fulltext_search ---
+  // --- crm_twenty_fulltext_search (GraphQL) ---
   server.registerTool(
     "crm_twenty_fulltext_search",
     {
@@ -298,7 +293,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
     },
   );
 
-  // --- crm_twenty_duplicates ---
+  // --- crm_twenty_duplicates (GraphQL) ---
   server.registerTool(
     "crm_twenty_duplicates",
     {
@@ -316,7 +311,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
     },
   );
 
-  // --- crm_twenty_group_by ---
+  // --- crm_twenty_group_by (GraphQL) ---
   server.registerTool(
     "crm_twenty_group_by",
     {
@@ -327,7 +322,7 @@ export function createMcpServer(client: TwentyClient): McpServer {
         groupBy: z.array(z.record(z.unknown())).min(1).describe("Fields to group by. Each entry is {fieldName: true} for simple grouping or {fieldName: granularity} for dates."),
         filter: z.record(z.unknown()).optional().describe("Optional filter to narrow records before grouping"),
         limit: z.number().int().min(1).optional().describe("Max number of groups to return"),
-        fields: z.array(z.string()).optional().describe("GroupBy result fields to return (default: totalCount). Available fields include totalCount, countUniqueValues*, countEmpty*, percentageEmpty*, min*, max* per grouped field."),
+        fields: z.array(z.string()).optional().describe("GroupBy result fields to return (default: totalCount)."),
       },
     },
     async (params) => {
@@ -335,6 +330,74 @@ export function createMcpServer(client: TwentyClient): McpServer {
       const { query, variables, operationName, resultKey } = buildGroupByQuery(resource, params);
       const data = await client.query<Record<string, unknown>>(operationName, query, variables);
       return formatRaw(data[resultKey]);
+    },
+  );
+
+  // --- Model Tools (Metadata API) ---
+
+  // --- crm_twenty_list_objects ---
+  server.registerTool(
+    "crm_twenty_list_objects",
+    {
+      description: "List all objects in the workspace (standard and custom), including their metadata IDs, names, and whether they are custom.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const result = await client.metadataListObjects();
+        return formatRaw(result);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
+  );
+
+  // --- crm_twenty_create_object ---
+  server.registerTool(
+    "crm_twenty_create_object",
+    {
+      description: "Create a new custom object in the workspace data model. After creation, it gets REST and GraphQL endpoints automatically.",
+      inputSchema: {
+        nameSingular: z.string().describe("Singular name for the object (e.g. 'invoice')"),
+        namePlural: z.string().describe("Plural name for the object (e.g. 'invoices')"),
+        labelSingular: z.string().describe("Singular display label (e.g. 'Invoice')"),
+        labelPlural: z.string().describe("Plural display label (e.g. 'Invoices')"),
+        description: z.string().optional().describe("Description of the object"),
+        icon: z.string().optional().describe("Icon name (e.g. 'IconFileInvoice')"),
+      },
+    },
+    async (params) => {
+      try {
+        const result = await client.metadataCreateObject(params);
+        return formatRaw(result);
+      } catch (err) {
+        return formatError(err);
+      }
+    },
+  );
+
+  // --- crm_twenty_create_field ---
+  server.registerTool(
+    "crm_twenty_create_field",
+    {
+      description: "Add a custom field to any object. Use crm_twenty_list_objects first to get the objectMetadataId. Supported types: TEXT, NUMBER, BOOLEAN, DATE_TIME, SELECT, MULTI_SELECT, CURRENCY, LINKS, EMAILS, PHONES, RELATION, RATING, ADDRESS, and more.",
+      inputSchema: {
+        objectMetadataId: z.string().describe("The UUID of the object to add the field to (from crm_twenty_list_objects)"),
+        name: z.string().describe("Field name in camelCase (e.g. 'invoiceAmount')"),
+        label: z.string().describe("Display label (e.g. 'Invoice Amount')"),
+        type: z.string().describe("Field type: TEXT, NUMBER, BOOLEAN, DATE_TIME, SELECT, MULTI_SELECT, CURRENCY, LINKS, EMAILS, PHONES, RELATION, RATING, ADDRESS, RICH_TEXT"),
+        description: z.string().optional().describe("Field description"),
+        icon: z.string().optional().describe("Icon name"),
+        options: z.array(z.record(z.unknown())).optional().describe("Options for SELECT/MULTI_SELECT fields: [{value, label, position, color}]"),
+      },
+    },
+    async (params) => {
+      try {
+        const result = await client.metadataCreateField(params);
+        return formatRaw(result);
+      } catch (err) {
+        return formatError(err);
+      }
     },
   );
 

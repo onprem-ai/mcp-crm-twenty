@@ -23,14 +23,144 @@ export interface FieldInfo {
   fields?: FieldInfo[];
 }
 
+export interface MetadataFieldInfo {
+  name: string;
+  label: string;
+  type: string;
+  isCustom: boolean;
+  isNullable: boolean;
+  isSystem: boolean;
+  description?: string;
+}
+
 export class TwentyClient {
   private baseUrl: string;
   private apiKey: string;
   private schemaCache = new Map<string, FieldInfo[]>();
+  private metadataCache = new Map<string, MetadataFieldInfo[]>();
 
   constructor(url: string, apiKey: string) {
     this.baseUrl = url.replace(/\/(rest|api|graphql)\/?$/, "");
     this.apiKey = apiKey;
+  }
+
+  private get headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    };
+  }
+
+  // --- REST Data API ---
+
+  async restCreate(resourcePlural: string, data: Record<string, unknown>): Promise<unknown> {
+    return this.restRequest("POST", `/rest/${resourcePlural}`, data);
+  }
+
+  async restUpdate(resourcePlural: string, id: string, data: Record<string, unknown>): Promise<unknown> {
+    return this.restRequest("PATCH", `/rest/${resourcePlural}/${id}`, data);
+  }
+
+  async restDelete(resourcePlural: string, id: string): Promise<unknown> {
+    return this.restRequest("DELETE", `/rest/${resourcePlural}/${id}`);
+  }
+
+  async restBulkCreate(resourcePlural: string, data: Record<string, unknown>[]): Promise<unknown> {
+    return this.restRequest("POST", `/rest/batch/${resourcePlural}`, data);
+  }
+
+  async restBulkUpdate(resourcePlural: string, data: Array<{ id: string } & Record<string, unknown>>): Promise<unknown> {
+    return this.restRequest("PATCH", `/rest/batch/${resourcePlural}`, data);
+  }
+
+  async restBulkDelete(resourcePlural: string, ids: string[]): Promise<unknown> {
+    return this.restRequest("DELETE", `/rest/batch/${resourcePlural}`, { ids });
+  }
+
+  private async restRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+    const options: RequestInit = { method, headers: this.headers };
+    if (body !== undefined) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, options);
+    const result = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const detail = result?.error?.message ?? result?.message ?? JSON.stringify(result) ?? response.statusText;
+      throw new Error(`Twenty REST error (${response.status}): ${detail}`);
+    }
+
+    return result?.data ?? result;
+  }
+
+  // --- Metadata API ---
+
+  async metadataListObjects(): Promise<unknown> {
+    return this.restRequest("GET", "/rest/metadata/objects");
+  }
+
+  async metadataGetObjectByName(objectNameSingular: string): Promise<Record<string, unknown> | null> {
+    const result = await this.restRequest("GET", "/rest/metadata/objects") as any;
+    const objects = result?.data?.objects ?? result?.objects ?? (Array.isArray(result) ? result : []);
+    for (const obj of objects) {
+      if ((obj as any)?.nameSingular === objectNameSingular) return obj as Record<string, unknown>;
+    }
+    return null;
+  }
+
+  async metadataCreateObject(data: Record<string, unknown>): Promise<unknown> {
+    return this.restRequest("POST", "/rest/metadata/objects", data);
+  }
+
+  async metadataCreateField(data: Record<string, unknown>): Promise<unknown> {
+    return this.restRequest("POST", "/rest/metadata/fields", data);
+  }
+
+  async getCompleteSchema(objectNameSingular: string): Promise<MetadataFieldInfo[]> {
+    const cached = this.metadataCache.get(objectNameSingular);
+    if (cached) return cached;
+
+    const obj = await this.metadataGetObjectByName(objectNameSingular);
+    if (!obj) throw new Error(`Object "${objectNameSingular}" not found in metadata`);
+
+    const fields = (obj.fields ?? []) as any[];
+    const result: MetadataFieldInfo[] = fields
+      .filter((f) => f.isActive !== false)
+      .map((f) => ({
+        name: f.name,
+        label: f.label,
+        type: f.type,
+        isCustom: f.isCustom ?? false,
+        isNullable: f.isNullable ?? true,
+        isSystem: f.isSystem ?? false,
+        description: f.description ?? undefined,
+      }));
+
+    this.metadataCache.set(objectNameSingular, result);
+    return result;
+  }
+
+  static formatMetadataSchema(objectName: string, fields: MetadataFieldInfo[]): string {
+    const lines: string[] = [`${objectName} fields:`];
+    const standard = fields.filter((f) => !f.isCustom && !f.isSystem);
+    const custom = fields.filter((f) => f.isCustom);
+
+    for (const f of standard) {
+      const desc = f.description ? ` - ${f.description}` : "";
+      const nullable = f.isNullable ? "" : " (required)";
+      lines.push(`  ${f.name}: ${f.type}${nullable}${desc}`);
+    }
+
+    if (custom.length > 0) {
+      lines.push(`\n  Custom fields:`);
+      for (const f of custom) {
+        const desc = f.description ? ` - ${f.description}` : "";
+        lines.push(`  ${f.name}: ${f.type}${desc}`);
+      }
+    }
+
+    return lines.join("\n");
   }
 
   /** Build a web UI URL for a record. */
