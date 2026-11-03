@@ -1,3 +1,8 @@
 node_modules/
 dist/
 .DS_Store
+
+# Raw API/schema dumps downloaded from a live instance can embed API keys
+# (Twenty's OpenAPI JSON includes ?token=<key> links). Never commit them.
+external/*.json
+*.openapi.json

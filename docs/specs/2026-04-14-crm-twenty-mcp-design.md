@@ -43,8 +43,6 @@ plugins/crm-twenty/
 │   └── graphql/
 │       └── builder.ts            # Dynamic GraphQL query/mutation builder
 ├── external/                     # Raw schemas (reference only, not shipped)
-│   ├── core.json
-│   ├── metadata.json
 │   ├── crm-graphql-core-schema.graphql
 │   └── crm-graphql-metadata-schema.graphql
 └── docs/
@@ -397,7 +395,7 @@ Note: For production, this would point to a compiled JS entry point. During deve
 
 If GraphQL proves problematic (auth issues, missing fields, instability), the MCP server can be switched to REST:
 
-- The OpenAPI specs (`core.json`, `metadata.json`) document all REST endpoints
+- Twenty's OpenAPI specs (`/rest/open-api/core`, `/rest/open-api/metadata` on your instance) document all REST endpoints
 - Each resource has 7 consistent REST endpoints: list, batch create, get by ID, find duplicates, restore by ID, batch restore, merge
 - The `resources.ts` registry would add REST path mappings
 - The builder would construct fetch calls instead of GraphQL queries
